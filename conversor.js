@@ -33,10 +33,8 @@ async function converterXmlParaTxt() {
 
         console.log(`Encontrados ${listings.length} imóveis. Gerando base para IA...`);
 
-        // Garante que a pasta output existe
-        if (!fs.existsSync('./output')) fs.mkdirSync('./output');
 
-        const outputStream = fs.createWriteStream('./output/base_imoveis_ia.txt', { encoding: 'utf-8' });
+        const outputStream = fs.createWriteStream('./base_imoveis_ia.txt', { encoding: 'utf-8' });
 
         listings.forEach(imovel => {
             const id = imovel.ListingID;
@@ -59,7 +57,7 @@ async function converterXmlParaTxt() {
         });
 
         await new Promise(resolve => outputStream.end(resolve));
-        console.log("Sucesso! Arquivo gerado em ./output/base_imoveis_ia.txt");
+        console.log("Sucesso! Arquivo gerado em ./base_imoveis_ia.txt");
 
     } catch (error) {
         console.error("Erro:", error.message);
