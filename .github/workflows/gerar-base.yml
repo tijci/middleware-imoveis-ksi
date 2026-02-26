@@ -1,0 +1,36 @@
+name: Gerar Base de Imóveis para IA
+
+on:
+  schedule:
+    - cron: '50 23 * * *'  # Roda às 23h50 UTC (20h50 horário de Brasília)
+                            # Ajuste conforme seu fuso: Brasília = UTC-3
+  workflow_dispatch:        # Permite rodar manualmente pelo painel do GitHub
+
+jobs:
+  gerar-base:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Executar conversor
+        run: node conversor.js
+
+      - name: Commitar e publicar o TXT atualizado
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/base_imoveis_ia.txt
+          git diff --staged --quiet || git commit -m "chore: atualiza base de imóveis $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
+
+
