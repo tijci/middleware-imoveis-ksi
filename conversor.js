@@ -1,11 +1,10 @@
+// ─── CONFIGURAÇÃO ─────────────────────────────────────────────────────────────
+const XML_URL = 'https://www.juliocasas.com.br/xml/xml_ksi_zap_vrsync_1_0_3.xml'
+// ──────────────────────────────────────────────────────────────────────────────
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const { XMLParser } = require('fast-xml-parser');
-
-// ─── CONFIGURAÇÃO ─────────────────────────────────────────────────────────────
-const XML_URL = 'https://www.juliocasas.com.br/xml/xml_ksi_zap_vrsync_1_0_3.xml'
-// ──────────────────────────────────────────────────────────────────────────────
 
 const parser = new XMLParser({
     ignoreAttributes: false,
@@ -76,24 +75,8 @@ async function converterXmlParaTxt() {
             const descricao = limparTexto(imovel.Details?.Description?.__cdata || imovel.Details?.Description || 'Não disponível');
             const link = `https://www.juliocasas.com.br/pesquisa-de-imoveis/?codigo=${codigoNumerico}`;
 
-            // Formato estruturado por campos — otimizado para chunking do RAG
-            const bloco =
-                `[IMOVEL]
-ID: ${id}
-OPERACAO: ${operacao}
-TITULO: ${titulo}
-BAIRRO: ${bairro}
-CIDADE: ${cidade}
-AREA: ${area}m2
-QUARTOS: ${quartos}
-BANHEIROS: ${banheiros}
-VAGAS: ${vagas}
-ALUGUEL: R$ ${preco}
-DESCRICAO: ${descricao}
-LINK: ${link}
-[/IMOVEL]
-
-`;
+            // Formato one-record-per-line: cada imóvel é uma linha completa e autocontida
+            const bloco = `ID: ${id} | OPERACAO: ${operacao} | TITULO: ${titulo} | BAIRRO: ${bairro} | CIDADE: ${cidade} | AREA: ${area}m2 | QUARTOS: ${quartos} | BANHEIROS: ${banheiros} | VAGAS: ${vagas} | ALUGUEL: R$ ${preco} | DESCRICAO: ${descricao} | LINK: ${link}\n`;
             outputStream.write(bloco);
             totalEscritos++;
         });
