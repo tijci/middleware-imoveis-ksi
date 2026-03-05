@@ -1,93 +1,115 @@
-// ─── CONFIGURAÇÃO ─────────────────────────────────────────────────────────────
-const XML_URL = 'https://www.juliocasas.com.br/xml/xml_ksi_zap_vrsync_1_0_3.xml'
-// ──────────────────────────────────────────────────────────────────────────────
-const https = require('https');
-const http = require('http');
-const fs = require('fs');
-const { XMLParser } = require('fast-xml-parser');
+// ====================================================================
+// limpar_xml.js
+// OBJETIVO: Gerar XML limpo para importação na base de conhecimento
+// do Neppo, removendo dados irrelevantes para embedding (imagens, 
+// contato, coordenadas) e mantendo apenas dados semânticos úteis.
+// ====================================================================
 
-const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: "",
-    cdataPropName: "__cdata"
+// 1. Importar as bibliotecas necessárias
+//    - fs: módulo nativo do Node para ler/escrever arquivos
+//    - xml2js: biblioteca externa para parsear XML <-> JS
+const fs = require('fs');
+const xml2js = require('xml2js');
+
+// 2. Definir caminhos dos arquivos
+//    - INPUT: Pode ser um caminho local ou um link (URL)
+//    - OUTPUT: o XML limpo que será importado no Neppo
+const ARQUIVO_ENTRADA = 'https://www.juliocasas.com.br/xml/xml_ksi_zap_vrsync_1_0_3.xml';
+const ARQUIVO_SAIDA = './xml_limpo_para_embedding.xml';
+
+// 3. Criar o parser com opções que preservam a estrutura original
+const parser = new xml2js.Parser({
+    explicitArray: false,  // Tag única vira string, não array
+    trim: true             // Remove espaços desnecessários
 });
 
-function fetchXML(url) {
-    return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http;
-        let data = '';
-        client.get(url, (res) => {
-            res.setEncoding('utf-8');
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => resolve(data));
-        }).on('error', reject);
-    });
-}
+// 4. Função principal assíncrona para processar o XML
+async function processarXML() {
+    let xmlOriginal;
 
-// Limpa o texto para não quebrar o formato de blocos do RAG
-function limparTexto(texto) {
-    if (!texto) return '';
-    return String(texto)
-        .replace(/\[IMOVEL\]|\[\/IMOVEL\]/g, '') // remove marcadores caso existam no texto
-        .replace(/\r\n/g, ' ')                    // quebras de linha viram espaço
-        .replace(/\n/g, ' ')
-        .replace(/\s{2,}/g, ' ')                  // múltiplos espaços viram um
-        .trim();
-}
-
-async function converterXmlParaTxt() {
-    try {
-        console.log("Buscando XML do KSI...");
-        const xmlData = await fetchXML(XML_URL);
-
-        console.log("Convertendo XML...");
-        const jsonObj = parser.parse(xmlData);
-        const listings = jsonObj.ListingDataFeed.Listings.Listing;
-
-        console.log(`Encontrados ${listings.length} imóveis. Gerando base para IA...`);
-
-        if (!fs.existsSync('./output')) fs.mkdirSync('./output');
-        const outputStream = fs.createWriteStream('./base_imoveis_ia.txt', { encoding: 'utf-8' });
-
-        let totalEscritos = 0;
-
-        listings.forEach(imovel => {
-            const id = imovel.ListingID || '';
-
-            // Define operação pelo prefixo do ID
-            const operacao = id.startsWith('L') ? 'Locacao' :
-                id.startsWith('V') ? 'Venda' : 'Nao informado';
-
-            const codigoNumerico = id.slice(1); // Remove o L ou V
-
-            // Preço: tenta aluguel primeiro, depois venda
-            const precoAluguel = imovel.Details?.RentalPrice?.["#text"] || imovel.Details?.RentalPrice || '';
-            const precoVenda = imovel.Details?.ListingPrice?.["#text"] || imovel.Details?.ListingPrice || '';
-            const preco = precoAluguel || precoVenda || 'Sob consulta';
-
-            const titulo = limparTexto(imovel.Title?.__cdata || imovel.Title || 'Sem título');
-            const bairro = limparTexto(imovel.Location?.Neighborhood?.__cdata || imovel.Location?.Neighborhood || 'Não informado');
-            const cidade = limparTexto(imovel.Location?.City || 'Sorocaba');
-            const area = imovel.Details?.LivingArea?.["#text"] || imovel.Details?.LivingArea || '0';
-            const quartos = imovel.Details?.Bedrooms || '0';
-            const banheiros = imovel.Details?.Bathrooms || '0';
-            const vagas = imovel.Details?.Garage || '0';
-            const descricao = limparTexto(imovel.Details?.Description?.__cdata || imovel.Details?.Description || 'Não disponível');
-            const link = `https://www.juliocasas.com.br/pesquisa-de-imoveis/?codigo=${codigoNumerico}`;
-
-            // Formato one-record-per-line: cada imóvel é uma linha completa e autocontida
-            const bloco = `ID: ${id} | OPERACAO: ${operacao} | TITULO: ${titulo} | BAIRRO: ${bairro} | CIDADE: ${cidade} | AREA: ${area}m2 | QUARTOS: ${quartos} | BANHEIROS: ${banheiros} | VAGAS: ${vagas} | ALUGUEL: R$ ${preco} | DESCRICAO: ${descricao} | LINK: ${link}\n`;
-            outputStream.write(bloco);
-            totalEscritos++;
-        });
-
-        await new Promise(resolve => outputStream.end(resolve));
-        console.log(`Sucesso! ${totalEscritos} imóveis escritos em ./base_imoveis_ia.txt`);
-
-    } catch (error) {
-        console.error("Erro:", error.message);
-        process.exit(1);
+    // 4a. Verificar se a entrada é um link ou arquivo local
+    if (ARQUIVO_ENTRADA.startsWith('http')) {
+        console.log(`🌐 Baixando XML de: ${ARQUIVO_ENTRADA}...`);
+        const resposta = await fetch(ARQUIVO_ENTRADA);
+        if (!resposta.ok) throw new Error(`Erro ao baixar XML: ${resposta.statusText}`);
+        xmlOriginal = await resposta.text();
+    } else {
+        console.log(`📖 Lendo arquivo XML local: ${ARQUIVO_ENTRADA}...`);
+        xmlOriginal = fs.readFileSync(ARQUIVO_ENTRADA, 'utf-8');
     }
+
+    console.log('⚙️  Parseando XML (isso pode levar alguns segundos)...');
+
+    // 5. Converter XML string → objeto JS
+    const resultado = await parser.parseStringPromise(xmlOriginal);
+
+    // 5b. Acessar o array de Listings (imóveis)
+    const listings = resultado.ListingDataFeed.Listings.Listing;
+
+    console.log(`📊 Total de imóveis encontrados: ${listings.length}`);
+
+    // 6. PROCESSAR cada Listing
+    const listingsLimpos = listings.map((listing, index) => {
+        // 6a. REMOVER campos de ruído
+        delete listing.Media;
+        delete listing.ContactInfo;
+        delete listing.CodigoExtra;
+        delete listing.PublicationType;
+        delete listing.Building;
+
+        // 6b. LIMPAR Location
+        if (listing.Location) {
+            delete listing.Location.Latitude;
+            delete listing.Location.Longitude;
+            delete listing.Location.PostalCode;
+            delete listing.Location.Complement;
+            delete listing.Location.StreetNumber;
+            if (listing.Location.$) delete listing.Location.$;
+        }
+
+        // 6c. LIMPAR Details
+        if (listing.Details) {
+            delete listing.Details.PropertyAdministrationFee;
+            delete listing.Details.YearlyTax;
+            delete listing.Details.YearBuilt;
+        }
+
+        if ((index + 1) % 50 === 0) {
+            console.log(`   Processados: ${index + 1}/${listings.length}`);
+        }
+
+        return listing;
+    });
+
+    // 7. Reconstruir o objeto e converter de volta para XML
+    resultado.ListingDataFeed.Listings.Listing = listingsLimpos;
+    delete resultado.ListingDataFeed.Header;
+    if (resultado.ListingDataFeed.$) delete resultado.ListingDataFeed.$;
+
+    const builder = new xml2js.Builder({
+        rootName: 'ListingDataFeed',
+        headless: false,
+        renderOpts: { pretty: true, indent: '  ', newline: '\n' },
+        cdata: true
+    });
+
+    const xmlLimpo = builder.buildObject(resultado.ListingDataFeed);
+
+    // 8. Salvar o arquivo de saída
+    fs.writeFileSync(ARQUIVO_SAIDA, xmlLimpo, 'utf-8');
+
+    // 9. Estatísticas
+    const tamanhoOriginal = Buffer.byteLength(xmlOriginal, 'utf-8');
+    const tamanhoLimpo = Buffer.byteLength(xmlLimpo, 'utf-8');
+    const reducao = ((1 - tamanhoLimpo / tamanhoOriginal) * 100).toFixed(1);
+
+    console.log('\n✅ XML limpo gerado com sucesso!');
+    console.log(`📁 Arquivo salvo em: ${ARQUIVO_SAIDA}`);
+    console.log(`📊 Redução: ${reducao}%`);
 }
 
-converterXmlParaTxt();
+// 10. Executar
+processarXML().catch((erro) => {
+    console.error('❌ Erro:', erro.message);
+    process.exit(1);
+});
